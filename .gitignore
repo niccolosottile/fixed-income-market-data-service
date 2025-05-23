@@ -58,3 +58,7 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+# Environment variables and secrets
+.env
+.env.*
