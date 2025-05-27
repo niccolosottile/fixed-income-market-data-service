@@ -1,6 +1,7 @@
 package com.fixedincome.marketdata.service.integration;
 
 import com.fixedincome.marketdata.config.AlternativeApiProperties;
+import com.fixedincome.marketdata.config.FallbackMarketData;
 import com.fixedincome.marketdata.dto.YieldCurveResponse;
 import com.fixedincome.marketdata.exception.MarketDataException;
 import com.fixedincome.marketdata.model.MarketData;
@@ -13,24 +14,20 @@ import org.springframework.web.client.RestTemplate;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Alternative client for fetching market data including yield curves, credit spreads,
- * and other reference data. Provides the same interface as FredApiClient for consistency.
+ * Alternative client for fetching market data.
  */
-@Service
+@Service("alternativeDataClient")
 @ConditionalOnProperty(name = "alternative.api.enabled", havingValue = "true", matchIfMissing = false)
 public class AlternativeDataClient extends AbstractMarketDataProvider {
 
-  // Alternative API Series IDs for Euro Area Government Bond yields (fallback to EUR region)
+  // Alternative API Series IDs for Euro Area Government Bond yields
   private static final Map<String, String> YIELD_CURVE_SERIES;
 
   static {
     Map<String, String> series = new HashMap<>();
-    // Euro Area Government Bond yields - using alternative data source identifiers
     series.put("1M", "ALT_EUR_1M");
     series.put("3M", "ALT_EUR_3M"); 
     series.put("6M", "ALT_EUR_6M");
@@ -50,78 +47,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   @SuppressWarnings("unused")
   private final RestTemplate restTemplate;
   private final AlternativeApiProperties properties;
-
-  // Static fallback credit spreads by rating (in basis points)
-  private static final Map<String, BigDecimal> FALLBACK_CREDIT_SPREADS = Map.of(
-    "AAA", new BigDecimal("25"),
-    "AA", new BigDecimal("40"),
-    "A", new BigDecimal("75"),
-    "BBB", new BigDecimal("150"),
-    "BB", new BigDecimal("300"),
-    "B", new BigDecimal("500"),
-    "CCC", new BigDecimal("800"),
-    "CC", new BigDecimal("1200"),
-    "C", new BigDecimal("2000")
-  );
-
-  // Static yield curve data for different regions (yield percentage)
-  private static final Map<String, Map<String, BigDecimal>> FALLBACK_YIELD_CURVES = new HashMap<>();
-
-  static {
-    // US Treasury yield curve
-    Map<String, BigDecimal> usTreasury = new HashMap<>();
-    usTreasury.put("1M", new BigDecimal("5.31"));
-    usTreasury.put("3M", new BigDecimal("5.28"));
-    usTreasury.put("6M", new BigDecimal("5.12"));
-    usTreasury.put("1Y", new BigDecimal("4.80"));
-    usTreasury.put("2Y", new BigDecimal("4.49"));
-    usTreasury.put("3Y", new BigDecimal("4.25"));
-    usTreasury.put("5Y", new BigDecimal("4.18"));
-    usTreasury.put("7Y", new BigDecimal("4.20"));
-    usTreasury.put("10Y", new BigDecimal("4.23"));
-    usTreasury.put("20Y", new BigDecimal("4.47"));
-    usTreasury.put("30Y", new BigDecimal("4.39"));
-    FALLBACK_YIELD_CURVES.put("US", usTreasury);
-
-    // Euro area yield curve (ECB AAA-rated euro area central government bonds)
-    Map<String, BigDecimal> euroArea = new HashMap<>();
-    euroArea.put("3M", new BigDecimal("3.72"));
-    euroArea.put("6M", new BigDecimal("3.51"));
-    euroArea.put("1Y", new BigDecimal("3.40"));
-    euroArea.put("2Y", new BigDecimal("3.15"));
-    euroArea.put("5Y", new BigDecimal("2.92"));
-    euroArea.put("7Y", new BigDecimal("2.89"));
-    euroArea.put("10Y", new BigDecimal("3.05"));
-    euroArea.put("20Y", new BigDecimal("3.31"));
-    euroArea.put("30Y", new BigDecimal("3.30"));
-    FALLBACK_YIELD_CURVES.put("EUR", euroArea);
-
-    // UK yield curve (BOE government bonds)
-    Map<String, BigDecimal> ukGilts = new HashMap<>();
-    ukGilts.put("1M", new BigDecimal("5.15"));
-    ukGilts.put("3M", new BigDecimal("5.05"));
-    ukGilts.put("6M", new BigDecimal("4.95"));
-    ukGilts.put("1Y", new BigDecimal("4.65"));
-    ukGilts.put("2Y", new BigDecimal("4.35"));
-    ukGilts.put("5Y", new BigDecimal("4.10"));
-    ukGilts.put("10Y", new BigDecimal("4.15"));
-    ukGilts.put("20Y", new BigDecimal("4.40"));
-    ukGilts.put("30Y", new BigDecimal("4.35"));
-    FALLBACK_YIELD_CURVES.put("UK", ukGilts);
-
-    // Japan yield curve (JGBs)
-    Map<String, BigDecimal> japanJgbs = new HashMap<>();
-    japanJgbs.put("1M", new BigDecimal("0.08"));
-    japanJgbs.put("3M", new BigDecimal("0.12"));
-    japanJgbs.put("6M", new BigDecimal("0.15"));
-    japanJgbs.put("1Y", new BigDecimal("0.20"));
-    japanJgbs.put("2Y", new BigDecimal("0.28"));
-    japanJgbs.put("5Y", new BigDecimal("0.59"));
-    japanJgbs.put("10Y", new BigDecimal("0.95"));
-    japanJgbs.put("20Y", new BigDecimal("1.70"));
-    japanJgbs.put("30Y", new BigDecimal("1.90"));
-    FALLBACK_YIELD_CURVES.put("JP", japanJgbs);
-  }
 
   public AlternativeDataClient(RestTemplate restTemplate, AlternativeApiProperties properties) {
     this.restTemplate = restTemplate;
@@ -153,7 +78,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
 
   /**
    * Fetches the latest yield curve data from Alternative API
-   * @return YieldCurveResponse with latest yield curve data
    */
   @Cacheable(value = "yieldCurves", key = "'alternative_latest'")
   @Override
@@ -162,45 +86,18 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
 
     validateApiConfiguration();
 
-    Map<String, BigDecimal> yieldCurve = new ConcurrentHashMap<>();
-
-    // Fetch data for each tenor concurrently
-    List<CompletableFuture<Void>> futures = YIELD_CURVE_SERIES.entrySet().stream()
-      .map(entry -> CompletableFuture.runAsync(() -> {
-        try {
-          String tenor = entry.getKey();
-          String seriesId = entry.getValue();
-          BigDecimal yield = fetchLatestYieldForSeries(seriesId, tenor);
-          if (yield != null) {
-            yieldCurve.put(tenor, yield);
-          }
-        } catch (Exception e) {
-          logger.warn("Failed to fetch yield for tenor {}: {}", entry.getKey(), e.getMessage());
-        }
-      }))
-      .collect(Collectors.toList());
-
-    // Wait for all requests to complete
-    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-    if (yieldCurve.isEmpty()) {
-      throw new MarketDataException("No yield curve data could be fetched from Alternative API");
+    if (!properties.isEnabled() || properties.getBaseUrl() == null) {
+      logger.info("Alternative API not configured, using fallback data");
+      return createFallbackYieldCurve();
     }
 
-    logger.info("Successfully fetched yield curve with {} data points", yieldCurve.size());
-
-    return YieldCurveResponse.builder()
-      .date(LocalDate.now())
-      .source(SOURCE)
-      .yields(yieldCurve)
-      .lastUpdated(LocalDate.now())
-      .build();
+    // TODO: Replace with actual API call when available
+    // For now, return fallback data
+    return createFallbackYieldCurve();
   }
 
   /**
    * Fetches historical yield curve data for a specific date
-   * @param date The date to fetch data for
-   * @return YieldCurveResponse with historical yield curve data
    */
   @Cacheable(value = "yieldCurves", key = "'alternative_' + #date.toString()")
   @Override
@@ -210,57 +107,16 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
     validateApiConfiguration();
     validateDate(date);
 
-    Map<String, BigDecimal> yieldCurve = new ConcurrentHashMap<>();
-    List<String> failedTenors = Collections.synchronizedList(new ArrayList<>());
-
-    // Fetch data for each tenor concurrently
-    List<CompletableFuture<Void>> futures = YIELD_CURVE_SERIES.entrySet().stream()
-      .map(entry -> CompletableFuture.runAsync(() -> {
-        try {
-          String tenor = entry.getKey();
-          String seriesId = entry.getValue();
-          BigDecimal yield = fetchYieldForSeriesOnDate(seriesId, tenor, date);
-          if (yield != null) {
-            yieldCurve.put(tenor, yield);
-          } else {
-            failedTenors.add(tenor);
-          }
-        } catch (Exception e) {
-          logger.warn("Failed to fetch historical yield for tenor {} on date {}: {}", 
-            entry.getKey(), date, e.getMessage());
-          failedTenors.add(entry.getKey());
-        }
-      }))
-      .collect(Collectors.toList());
-
-    // Wait for all requests to complete
-    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-    if (yieldCurve.isEmpty()) {
-      throw new MarketDataException("No yield curve data available for date: " + date);
+    if (!properties.isEnabled() || properties.getBaseUrl() == null) {
+      return createFallbackYieldCurve(date);
     }
 
-    if (!failedTenors.isEmpty()) {
-      logger.warn("Failed to fetch data for tenors: {}", String.join(", ", failedTenors));
-    }
-
-    logger.info("Successfully fetched historical yield curve for {} with {} data points", 
-      date, yieldCurve.size());
-
-    return YieldCurveResponse.builder()
-      .date(date)
-      .source(SOURCE)
-      .yields(yieldCurve)
-      .lastUpdated(LocalDate.now())
-      .build();
+    // TODO: Replace with actual API call when available
+    return createFallbackYieldCurve(date);
   }
 
   /**
-   * Fetches a time series of yield data for a specific tenor
-   * @param tenor The tenor (e.g., "10Y")
-   * @param startDate Beginning of the time period
-   * @param endDate End of the time period
-   * @return List of yield data points
+   * Fetches yield time series data
    */
   @Cacheable(value = "yieldTimeSeries", key = "'alternative_' + #tenor + '_' + #startDate + '_' + #endDate")
   @Override
@@ -271,28 +127,16 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
     validateTenor(tenor);
     validateDateRange(startDate, endDate);
 
-    String seriesId = YIELD_CURVE_SERIES.get(tenor);
-
-    try {
-      List<MarketData> marketDataList = fetchAlternativeTimeSeriesData(seriesId, tenor, startDate, endDate);
-
-      if (marketDataList.isEmpty()) {
-        logger.warn("No data found for tenor {} in date range {} to {}", tenor, startDate, endDate);
-      }
-
-      logger.info("Successfully fetched {} yield data points for tenor {}", 
-        marketDataList.size(), tenor);
-      return marketDataList;
-
-    } catch (RestClientException e) {
-      throw new MarketDataException("Failed to fetch yield time series from Alternative API for tenor: " + tenor, e);
+    if (!properties.isEnabled() || properties.getBaseUrl() == null) {
+      return generateFallbackTimeSeriesData(tenor, startDate, endDate);
     }
+
+    // TODO: Replace with actual API call when available
+    return generateFallbackTimeSeriesData(tenor, startDate, endDate);
   }
 
   /**
-   * Fetches yield curve data for multiple dates
-   * @param dates List of dates to fetch data for
-   * @return List of YieldCurveResponse objects
+   * Fetches multiple yield curves for batch processing
    */
   @Cacheable(value = "yieldCurvesBatch", key = "'alternative_' + #dates.toString()")
   @Override
@@ -304,56 +148,35 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
       throw new MarketDataException("Dates list cannot be null or empty");
     }
 
-    // Process dates concurrently for better performance
-    List<CompletableFuture<YieldCurveResponse>> futures = dates.stream()
-      .map(date -> CompletableFuture.supplyAsync(() -> {
-        try {
-          return fetchHistoricalYieldCurve(date);
-        } catch (Exception e) {
-          logger.warn("Failed to fetch yield curve for date {}: {}", date, e.getMessage());
-          return null;
-        }
-      }))
+    return dates.stream()
+      .map(this::fetchHistoricalYieldCurve)
       .collect(Collectors.toList());
-
-    // Wait for all requests to complete and collect results
-    List<YieldCurveResponse> results = futures.stream()
-      .map(CompletableFuture::join)
-      .filter(Objects::nonNull)
-      .collect(Collectors.toList());
-
-    logger.info("Successfully fetched yield curves for {}/{} dates", results.size(), dates.size());
-    return results;
   }
 
   /**
-   * Fetches raw credit spreads by rating
-   * @return Map of credit rating to spread value in basis points
+   * Fetches credit spreads by rating
    */
   @Cacheable(value = "creditSpreads", key = "'alternative_credit_spreads'")
   @Override
   public Map<String, BigDecimal> fetchCreditSpreads() {
     if (!properties.isEnabled()) {
       logger.debug("Alternative API is disabled, using fallback credit spread data");
-      return getFallbackCreditSpreads();
+      return new HashMap<>(FallbackMarketData.CREDIT_SPREADS);
     }
 
     try {
       logger.debug("Fetching credit spreads from alternative data source");
 
       // TODO: Replace with actual API endpoint when available
-      // String url = properties.getBaseUrl() + "/credit-spreads";
-      // Map<String, BigDecimal> response = restTemplate.getForObject(url, Map.class);
-
       // For now, simulate API response with fallback
-      return getFallbackCreditSpreads();
+      return new HashMap<>(FallbackMarketData.CREDIT_SPREADS);
 
     } catch (RestClientException e) {
       logger.warn("Failed to fetch credit spreads from alternative API: {}", e.getMessage());
 
       if (properties.isUseFallbackData()) {
         logger.info("Using fallback credit spread data");
-        return getFallbackCreditSpreads();
+        return new HashMap<>(FallbackMarketData.CREDIT_SPREADS);
       } else {
         throw new MarketDataException("Failed to fetch credit spreads and fallback is disabled", e);
       }
@@ -361,129 +184,16 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   }
 
   /**
-   * Fetch raw inflation expectations data (breakeven rates)
-   * @param region Region code
-   * @return Map of terms to breakeven inflation rates
-   */
-  @Cacheable(value = "inflationExpectations", key = "'alternative_inflation_' + #region")
-  @Override
-  public Map<String, BigDecimal> fetchInflationExpectations(String region) {
-    Map<String, BigDecimal> inflationRates = new HashMap<>();
-
-    // Fallback data - typical inflation expectations by tenor
-    switch (region.toUpperCase()) {
-      case "US":
-        inflationRates.put("2Y", new BigDecimal("2.5"));
-        inflationRates.put("5Y", new BigDecimal("2.3"));
-        inflationRates.put("10Y", new BigDecimal("2.2"));
-        inflationRates.put("30Y", new BigDecimal("2.1"));
-        break;
-      case "EUR":
-        inflationRates.put("2Y", new BigDecimal("2.1"));
-        inflationRates.put("5Y", new BigDecimal("2.0"));
-        inflationRates.put("10Y", new BigDecimal("1.9"));
-        inflationRates.put("30Y", new BigDecimal("1.8"));
-        break;
-      case "UK":
-        inflationRates.put("2Y", new BigDecimal("3.2"));
-        inflationRates.put("5Y", new BigDecimal("3.0"));
-        inflationRates.put("10Y", new BigDecimal("2.8"));
-        inflationRates.put("30Y", new BigDecimal("2.7"));
-        break;
-      default:
-        inflationRates.put("5Y", new BigDecimal("2.0"));
-        inflationRates.put("10Y", new BigDecimal("2.0"));
-    }
-
-    return inflationRates;
-  }
-
-  /**
-   * Fetches benchmark rates for different regions (central bank rates)
-   * @return Map of region code to benchmark rate
+   * Fetches benchmark rates for different regions
    */
   @Cacheable(value = "benchmarkRates", key = "'alternative_benchmark_rates'")
   @Override
   public Map<String, BigDecimal> fetchBenchmarkRates() {
-    // Fallback data - typical central bank rates
-    Map<String, BigDecimal> benchmarkRates = new HashMap<>();
-    benchmarkRates.put("US", new BigDecimal("5.25"));  // Fed Funds Rate
-    benchmarkRates.put("EUR", new BigDecimal("3.75")); // ECB Deposit Rate
-    benchmarkRates.put("UK", new BigDecimal("5.00"));  // Bank of England
-    benchmarkRates.put("JP", new BigDecimal("0.10"));  // Bank of Japan
-    benchmarkRates.put("CA", new BigDecimal("4.50"));  // Bank of Canada
-    benchmarkRates.put("AU", new BigDecimal("4.10"));  // Reserve Bank of Australia
-
-    return benchmarkRates;
-  }
-
-  /**
-   * Fetches sector-specific credit data for corporate bonds
-   * @param sector Industry sector
-   * @return Map of ratings to sector-specific credit spreads
-   */
-  @Cacheable(value = "sectorCreditData", key = "'alternative_sector_' + #sector")
-  @Override
-  public Map<String, BigDecimal> fetchSectorCreditData(String sector) {
-    Map<String, BigDecimal> sectorAdjustments = new HashMap<>();
-
-    // Sample sector data - this would come from the API in reality
-    // These represent sector-specific basis point adjustments
-    if ("TECH".equalsIgnoreCase(sector)) {
-      sectorAdjustments.put("AAA", new BigDecimal("-5"));
-      sectorAdjustments.put("AA", new BigDecimal("-5"));
-      sectorAdjustments.put("A", new BigDecimal("-3"));
-      sectorAdjustments.put("BBB", new BigDecimal("0"));
-      sectorAdjustments.put("BB", new BigDecimal("5"));
-      sectorAdjustments.put("B", new BigDecimal("10"));
-    } else if ("FINANCE".equalsIgnoreCase(sector)) {
-      sectorAdjustments.put("AAA", new BigDecimal("5"));
-      sectorAdjustments.put("AA", new BigDecimal("7"));
-      sectorAdjustments.put("A", new BigDecimal("10"));
-      sectorAdjustments.put("BBB", new BigDecimal("15"));
-      sectorAdjustments.put("BB", new BigDecimal("25"));
-      sectorAdjustments.put("B", new BigDecimal("35"));
-    } else if ("ENERGY".equalsIgnoreCase(sector)) {
-      sectorAdjustments.put("AAA", new BigDecimal("3"));
-      sectorAdjustments.put("AA", new BigDecimal("5"));
-      sectorAdjustments.put("A", new BigDecimal("10"));
-      sectorAdjustments.put("BBB", new BigDecimal("20"));
-      sectorAdjustments.put("BB", new BigDecimal("30"));
-      sectorAdjustments.put("B", new BigDecimal("40"));
-    } else {
-      // Default/other sectors
-      sectorAdjustments.put("AAA", BigDecimal.ZERO);
-      sectorAdjustments.put("AA", BigDecimal.ZERO);
-      sectorAdjustments.put("A", BigDecimal.ZERO);
-      sectorAdjustments.put("BBB", BigDecimal.ZERO);
-      sectorAdjustments.put("BB", BigDecimal.ZERO);
-      sectorAdjustments.put("B", BigDecimal.ZERO);
-    }
-
-    return sectorAdjustments;
-  }
-
-  /**
-   * Fetches raw liquidity premium data by instrument type
-   * @return Map of instrument types to liquidity premium values
-   */
-  @Cacheable(value = "liquidityPremiums", key = "'alternative_liquidity_premiums'")
-  @Override
-  public Map<String, BigDecimal> fetchLiquidityPremiums() {
-    // Typical liquidity premiums (in basis points)
-    Map<String, BigDecimal> premiums = new HashMap<>();
-    premiums.put("GOVERNMENT", new BigDecimal("0"));      // Government bonds are most liquid
-    premiums.put("CORPORATE", new BigDecimal("15"));      // Corporate bonds have moderate liquidity
-    premiums.put("MUNICIPAL", new BigDecimal("25"));      // Municipal bonds less liquid
-    premiums.put("HIGH_YIELD", new BigDecimal("50"));     // High yield bonds least liquid
-    premiums.put("EMERGING_MARKET", new BigDecimal("75")); // EM bonds have higher liquidity premium
-
-    return premiums;
+    return new HashMap<>(FallbackMarketData.BENCHMARK_RATES);
   }
 
   /**
    * Health check for the alternative data source
-   * @return true if the service is available and responding
    */
   @Override
   public boolean isServiceHealthy() {
@@ -493,8 +203,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
 
     try {
       // TODO: Implement actual health check endpoint
-      // String healthUrl = properties.getBaseUrl() + "/health";
-      // restTemplate.getForObject(healthUrl, String.class);
       return true;
     } catch (Exception e) {
       logger.warn("Alternative data service health check failed: {}", e.getMessage());
@@ -504,92 +212,25 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
 
   // ===== PRIVATE HELPER METHODS =====
 
-  private BigDecimal fetchLatestYieldForSeries(String seriesId, String tenor) {
-    try {
-      if (!properties.isEnabled() || properties.getBaseUrl() == null) {
-        return getFallbackYieldForTenor(tenor, "EUR");
-      }
-
-      // TODO: Replace with actual API endpoint when available
-      // String url = buildAlternativeUrl(seriesId, null, null, 1, "desc");
-      // AlternativeApiResponse response = restTemplate.getForObject(url, AlternativeApiResponse.class);
-
-      // For now, return fallback data
-      return getFallbackYieldForTenor(tenor, "EUR");
-
-    } catch (Exception e) {
-      logger.error("Error fetching latest yield for series {}: {}", seriesId, e.getMessage());
-      if (properties.isUseFallbackData()) {
-        return getFallbackYieldForTenor(tenor, "EUR");
-      }
-      throw new MarketDataException("Failed to fetch latest yield for series: " + seriesId, e);
-    }
+  private YieldCurveResponse createFallbackYieldCurve() {
+    return createFallbackYieldCurve(LocalDate.now());
   }
 
-  private BigDecimal fetchYieldForSeriesOnDate(String seriesId, String tenor, LocalDate date) {
-    try {
-      if (!properties.isEnabled() || properties.getBaseUrl() == null) {
-        return getFallbackYieldForTenor(tenor, "EUR");
-      }
-
-      // TODO: Replace with actual API endpoint when available
-      // String url = buildAlternativeUrl(seriesId, date, date, 1, "desc");
-      // AlternativeApiResponse response = restTemplate.getForObject(url, AlternativeApiResponse.class);
-
-      // For now, return fallback data with slight historical variation
-      BigDecimal baseYield = getFallbackYieldForTenor(tenor, "EUR");
-      if (baseYield != null) {
-        // Add small historical variation based on date
-        Random random = new Random(date.hashCode());
-        int variation = random.nextInt(20) - 10; // -10 to +10 basis points
-        BigDecimal adjustment = new BigDecimal(variation).divide(new BigDecimal("10000"));
-        return baseYield.add(adjustment);
-      }
-      return null;
-
-    } catch (Exception e) {
-      logger.error("Error fetching yield for series {} on date {}: {}", seriesId, date, e.getMessage());
-      if (properties.isUseFallbackData()) {
-        return getFallbackYieldForTenor(tenor, "EUR");
-      }
-      throw new MarketDataException("Failed to fetch yield for series " + seriesId + " on date " + date, e);
-    }
-  }
-
-  private List<MarketData> fetchAlternativeTimeSeriesData(String seriesId, String tenor, LocalDate startDate, LocalDate endDate) {
-    try {
-      if (!properties.isEnabled() || properties.getBaseUrl() == null) {
-        return generateFallbackTimeSeriesData(tenor, startDate, endDate);
-      }
-
-      // TODO: Replace with actual API endpoint when available
-      // String url = buildAlternativeUrl(seriesId, startDate, endDate, null, "asc");
-      // AlternativeApiResponse response = restTemplate.getForObject(url, AlternativeApiResponse.class);
-
-      // For now, generate synthetic time series
-      return generateFallbackTimeSeriesData(tenor, startDate, endDate);
-
-    } catch (Exception e) {
-      logger.error("Error fetching time series data: {}", e.getMessage());
-      if (properties.isUseFallbackData()) {
-        return generateFallbackTimeSeriesData(tenor, startDate, endDate);
-      }
-      throw new MarketDataException("Failed to fetch time series data from Alternative API", e);
-    }
-  }
-
-  private BigDecimal getFallbackYieldForTenor(String tenor, String region) {
-    Map<String, BigDecimal> regionCurve = FALLBACK_YIELD_CURVES.get(region.toUpperCase());
-    if (regionCurve == null) {
-      regionCurve = FALLBACK_YIELD_CURVES.get("EUR"); // Default to EUR
-    }
-    return regionCurve.get(tenor);
+  private YieldCurveResponse createFallbackYieldCurve(LocalDate date) {
+    Map<String, BigDecimal> eurYields = FallbackMarketData.YIELD_CURVES.get("EUR");
+    
+    return YieldCurveResponse.builder()
+      .date(date)
+      .source(SOURCE)
+      .yields(eurYields)
+      .lastUpdated(LocalDate.now())
+      .build();
   }
 
   private List<MarketData> generateFallbackTimeSeriesData(String tenor, LocalDate startDate, LocalDate endDate) {
     List<MarketData> marketDataList = new ArrayList<>();
 
-    // Get starting yield value
+    // Get starting yield value from centralized fallback data
     BigDecimal currentYield = getFallbackYieldForTenor(tenor, "EUR");
     if (currentYield == null) {
       currentYield = new BigDecimal("3.0"); // Default fallback
@@ -615,15 +256,10 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
       // Generate small random changes for next day (realistic volatility)
       int volatilityFactor = getVolatilityFactor(tenor);
       int basis = random.nextInt(volatilityFactor) - (volatilityFactor / 2);
-
-      // Add small drift factor for realism
       int drift = random.nextInt(3) - 1; // -1, 0, or 1
 
-      // Convert basis points to percentage (divide by 10000 for 1bp = 0.0001)
-      BigDecimal change = new BigDecimal(basis + drift)
-        .divide(new BigDecimal("10000"));
-
-      // Calculate next day's yield
+      // Convert basis points to percentage
+      BigDecimal change = new BigDecimal(basis + drift).divide(new BigDecimal("10000"));
       currentYield = currentYield.add(change);
 
       // Ensure yield remains positive and realistic
@@ -631,15 +267,17 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
         currentYield = new BigDecimal("0.01");
       }
 
-      // Move to next day
       currentDate = currentDate.plusDays(1);
     }
 
     return marketDataList;
   }
 
-  private Map<String, BigDecimal> getFallbackCreditSpreads() {
-    logger.debug("Using fallback credit spreads");
-    return new HashMap<>(FALLBACK_CREDIT_SPREADS);
+  private BigDecimal getFallbackYieldForTenor(String tenor, String region) {
+    Map<String, BigDecimal> regionCurve = FallbackMarketData.YIELD_CURVES.get(region.toUpperCase());
+    if (regionCurve == null) {
+      regionCurve = FallbackMarketData.YIELD_CURVES.get("EUR"); // Default to EUR
+    }
+    return regionCurve.get(tenor);
   }
 }
