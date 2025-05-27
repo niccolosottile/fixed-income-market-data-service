@@ -40,7 +40,7 @@ export DATABASE_PASSWORD=prod_password
 
 - **application.properties**: Common settings, non-sensitive configuration
 - **application-dev.properties**: Development-specific settings
-- **application-prod.properties**: Production settings
+- **application-prod.properties**: Production-specific settings
 - **.env**: Local development secrets
 - **.env.example**: Template showing required environment variables
 
@@ -49,4 +49,18 @@ export DATABASE_PASSWORD=prod_password
 Each environment should have its own FRED API key:
 - Development: Personal API key in `.env` file
 - Production: Separate API key per client/deployment
-- Use cloud provider secret management (AWS Secrets Manager, Azure Key Vault, etc.) for production
+- Use cloud provider secret management for production
+
+## Alternative Data Source Configuration
+
+The application includes an alternative source for market data that can complement or replace FRED when needed.
+
+### Configuration Properties
+
+```properties
+# Alternative Data API Configuration
+alternative.api.enabled=false                    # Disabled by default
+alternative.api.base-url=${ALTERNATIVE_API_URL:} # API endpoint
+alternative.api.api-key=${ALTERNATIVE_API_KEY:}  # API authentication
+alternative.api.use-fallback-data=true           # Enable fallback data
+```

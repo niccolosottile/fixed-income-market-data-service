@@ -233,6 +233,45 @@ public class FredApiClient {
     return results;
   }
   
+  /**
+   * Health check for the FRED API service
+   * @return true if the service is available and responding
+   */
+  public boolean isServiceHealthy() {
+    try {
+      // Use existing validation method
+      validateApiKey();
+      
+      // Test the API with a simple request for the 10Y yield (most commonly available)
+      String testSeriesId = YIELD_CURVE_SERIES.get("10Y");
+      if (testSeriesId == null) {
+        logger.warn("Test series ID not found for health check");
+        return false;
+      }
+      
+      // Make a minimal request to check API availability
+      String url = buildFredUrl(testSeriesId, null, null, 1, "desc");
+      FredApiResponse response = restTemplate.getForObject(url, FredApiResponse.class);
+      
+      // Check if we got a valid response
+      if (response != null && response.getObservations() != null) {
+        logger.debug("FRED API health check passed");
+        return true;
+      } else {
+        logger.warn("FRED API health check failed: received invalid response");
+        return false;
+      }
+      
+    } catch (MarketDataException e) {
+      // This will catch validation errors from validateApiKey()
+      logger.warn("FRED API health check failed: {}", e.getMessage());
+      return false;
+    } catch (Exception e) {
+      logger.warn("FRED API health check failed: {}", e.getMessage());
+      return false;
+    }
+  }
+  
   // Helper methods
   private void validateApiKey() {
     if (fredApiProperties.getApiKey() == null || fredApiProperties.getApiKey().trim().isEmpty()) {

@@ -48,7 +48,7 @@ class FredApiClientTest {
     // Arrange
     FredApiResponse mockResponse = createMockFredResponse("4.25");
     when(restTemplate.getForObject(anyString(), eq(FredApiResponse.class)))
-        .thenReturn(mockResponse);
+      .thenReturn(mockResponse);
 
     // Act
     YieldCurveResponse result = fredApiClient.fetchLatestYieldCurve();
@@ -68,7 +68,7 @@ class FredApiClientTest {
     LocalDate testDate = LocalDate.of(2024, 1, 15);
     FredApiResponse mockResponse = createMockFredResponse("4.15");
     when(restTemplate.getForObject(anyString(), eq(FredApiResponse.class)))
-        .thenReturn(mockResponse);
+      .thenReturn(mockResponse);
 
     // Act
     YieldCurveResponse result = fredApiClient.fetchHistoricalYieldCurve(testDate);
@@ -88,7 +88,7 @@ class FredApiClientTest {
 
     // Act & Assert
     assertThrows(MarketDataException.class, () -> 
-        fredApiClient.fetchHistoricalYieldCurve(futureDate));
+      fredApiClient.fetchHistoricalYieldCurve(futureDate));
   }
 
   @Test
@@ -98,7 +98,7 @@ class FredApiClientTest {
     LocalDate endDate = LocalDate.of(2024, 1, 31);
     FredApiResponse mockResponse = createMockTimeSeriesResponse();
     when(restTemplate.getForObject(anyString(), eq(FredApiResponse.class)))
-        .thenReturn(mockResponse);
+      .thenReturn(mockResponse);
 
     // Act
     List<MarketData> result = fredApiClient.fetchYieldTimeSeries("10Y", startDate, endDate);
@@ -116,7 +116,7 @@ class FredApiClientTest {
   void testFetchYieldTimeSeries_InvalidTenor() {
     // Act & Assert
     assertThrows(MarketDataException.class, () -> 
-        fredApiClient.fetchYieldTimeSeries("INVALID", LocalDate.now().minusDays(1), LocalDate.now()));
+      fredApiClient.fetchYieldTimeSeries("INVALID", LocalDate.now().minusDays(1), LocalDate.now()));
   }
 
   @Test
@@ -127,19 +127,19 @@ class FredApiClientTest {
 
     // Act & Assert
     assertThrows(MarketDataException.class, () -> 
-        fredApiClient.fetchYieldTimeSeries("10Y", startDate, endDate));
+      fredApiClient.fetchYieldTimeSeries("10Y", startDate, endDate));
   }
 
   @Test
   void testFetchYieldCurvesForDates_Success() {
     // Arrange
     List<LocalDate> dates = List.of(
-        LocalDate.of(2024, 1, 1),
-        LocalDate.of(2024, 1, 2)
+      LocalDate.of(2024, 1, 1),
+      LocalDate.of(2024, 1, 2)
     );
     FredApiResponse mockResponse = createMockFredResponse("4.20");
     when(restTemplate.getForObject(anyString(), eq(FredApiResponse.class)))
-        .thenReturn(mockResponse);
+      .thenReturn(mockResponse);
 
     // Act
     List<YieldCurveResponse> result = fredApiClient.fetchYieldCurvesForDates(dates);
@@ -154,7 +154,7 @@ class FredApiClientTest {
   void testFetchYieldCurvesForDates_EmptyList() {
     // Act & Assert
     assertThrows(MarketDataException.class, () -> 
-        fredApiClient.fetchYieldCurvesForDates(List.of()));
+      fredApiClient.fetchYieldCurvesForDates(List.of()));
   }
 
   @Test
@@ -165,7 +165,7 @@ class FredApiClientTest {
 
     // Act & Assert
     assertThrows(MarketDataException.class, () -> 
-        clientWithoutKey.fetchLatestYieldCurve());
+      clientWithoutKey.fetchLatestYieldCurve());
   }
 
   @Test
@@ -173,7 +173,7 @@ class FredApiClientTest {
     // Arrange
     FredApiResponse mockResponse = createMockFredResponse("4.25");
     when(restTemplate.getForObject(anyString(), eq(FredApiResponse.class)))
-        .thenReturn(mockResponse);
+      .thenReturn(mockResponse);
 
     // Act
     YieldCurveResponse result = fredApiClient.fetchLatestYieldCurve();
