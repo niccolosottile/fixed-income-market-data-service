@@ -5,8 +5,6 @@ import com.fixedincome.marketdata.dto.FredApiResponse;
 import com.fixedincome.marketdata.dto.YieldCurveResponse;
 import com.fixedincome.marketdata.exception.MarketDataException;
 import com.fixedincome.marketdata.model.MarketData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
@@ -15,16 +13,13 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
-public class FredApiClient {
-    
-  private static final Logger logger = LoggerFactory.getLogger(FredApiClient.class);
+public class FredApiClient extends AbstractMarketDataProvider {
   
   // FRED API Series IDs for Euro Area Government Bond yields
   private static final Map<String, String> YIELD_CURVE_SERIES;
@@ -47,7 +42,6 @@ public class FredApiClient {
   }
   
   private static final String SOURCE = "FRED";
-  private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
   
   private final RestTemplate restTemplate;
   private final FredApiProperties fredApiProperties;
@@ -57,15 +51,37 @@ public class FredApiClient {
     this.fredApiProperties = fredApiProperties;
   }
   
+  // ===== ABSTRACT METHOD IMPLEMENTATIONS =====
+  
+  @Override
+  protected void validateApiConfiguration() {
+    if (fredApiProperties.getApiKey() == null || fredApiProperties.getApiKey().trim().isEmpty()) {
+      throw new MarketDataException("FRED API key is not configured");
+    }
+  }
+  
+  @Override
+  protected Map<String, String> getYieldCurveSeriesMapping() {
+    return YIELD_CURVE_SERIES;
+  }
+  
+  @Override
+  public String getProviderName() {
+    return SOURCE;
+  }
+  
+  // ===== CORE YIELD CURVE OPERATIONS =====
+  
   /**
    * Fetches the latest yield curve data from FRED
    * @return YieldCurveResponse with latest yield curve data
    */
   @Cacheable(value = "yieldCurves", key = "'latest'")
+  @Override
   public YieldCurveResponse fetchLatestYieldCurve() {
     logger.info("Fetching latest yield curve data from FRED");
     
-    validateApiKey();
+    validateApiConfiguration();
     
     Map<String, BigDecimal> yieldCurve = new ConcurrentHashMap<>();
     
@@ -84,7 +100,7 @@ public class FredApiClient {
         }
       }))
       .collect(Collectors.toList());
-  
+
     // Wait for all requests to complete
     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
     
@@ -108,10 +124,11 @@ public class FredApiClient {
    * @return YieldCurveResponse with historical yield curve data
    */
   @Cacheable(value = "yieldCurves", key = "#date.toString()")
+  @Override
   public YieldCurveResponse fetchHistoricalYieldCurve(LocalDate date) {
     logger.info("Fetching historical yield curve data for date: {}", date);
     
-    validateApiKey();
+    validateApiConfiguration();
     validateDate(date);
     
     Map<String, BigDecimal> yieldCurve = new ConcurrentHashMap<>();
@@ -167,18 +184,15 @@ public class FredApiClient {
    * @return List of yield data points
    */
   @Cacheable(value = "yieldTimeSeries", key = "#tenor + '_' + #startDate + '_' + #endDate")
+  @Override
   public List<MarketData> fetchYieldTimeSeries(String tenor, LocalDate startDate, LocalDate endDate) {
     logger.info("Fetching yield time series for tenor {} from {} to {}", tenor, startDate, endDate);
     
-    validateApiKey();
+    validateApiConfiguration();
     validateTenor(tenor);
     validateDateRange(startDate, endDate);
     
     String seriesId = YIELD_CURVE_SERIES.get(tenor);
-    if (seriesId == null) {
-      throw new MarketDataException("Invalid tenor: " + tenor + ". Supported tenors: " + 
-        String.join(", ", YIELD_CURVE_SERIES.keySet()));
-    }
     
     try {
       FredApiResponse response = fetchFredData(seriesId, startDate, endDate);
@@ -203,10 +217,11 @@ public class FredApiClient {
    * @return List of YieldCurveResponse objects
    */
   @Cacheable(value = "yieldCurvesBatch", key = "#dates.toString()")
+  @Override
   public List<YieldCurveResponse> fetchYieldCurvesForDates(List<LocalDate> dates) {
     logger.info("Fetching yield curves for {} dates", dates.size());
     
-    validateApiKey();
+    validateApiConfiguration();
     if (dates == null || dates.isEmpty()) {
       throw new MarketDataException("Dates list cannot be null or empty");
     }
@@ -237,10 +252,11 @@ public class FredApiClient {
    * Health check for the FRED API service
    * @return true if the service is available and responding
    */
+  @Override
   public boolean isServiceHealthy() {
     try {
       // Use existing validation method
-      validateApiKey();
+      validateApiConfiguration();
       
       // Test the API with a simple request for the 10Y yield (most commonly available)
       String testSeriesId = YIELD_CURVE_SERIES.get("10Y");
@@ -263,7 +279,7 @@ public class FredApiClient {
       }
       
     } catch (MarketDataException e) {
-      // This will catch validation errors from validateApiKey()
+      // This will catch validation errors from validateApiConfiguration()
       logger.warn("FRED API health check failed: {}", e.getMessage());
       return false;
     } catch (Exception e) {
@@ -272,43 +288,7 @@ public class FredApiClient {
     }
   }
   
-  // Helper methods
-  private void validateApiKey() {
-    if (fredApiProperties.getApiKey() == null || fredApiProperties.getApiKey().trim().isEmpty()) {
-      throw new MarketDataException("FRED API key is not configured");
-    }
-  }
-  
-  private void validateTenor(String tenor) {
-    if (tenor == null || tenor.trim().isEmpty()) {
-      throw new MarketDataException("Tenor cannot be null or empty");
-    }
-    if (!YIELD_CURVE_SERIES.containsKey(tenor)) {
-      throw new MarketDataException("Invalid tenor: " + tenor + ". Supported tenors: " + 
-        String.join(", ", YIELD_CURVE_SERIES.keySet()));
-    }
-  }
-  
-  private void validateDate(LocalDate date) {
-    if (date == null) {
-      throw new MarketDataException("Date cannot be null");
-    }
-    if (date.isAfter(LocalDate.now())) {
-      throw new MarketDataException("Date cannot be in the future");
-    }
-  }
-  
-  private void validateDateRange(LocalDate startDate, LocalDate endDate) {
-    if (startDate == null || endDate == null) {
-      throw new MarketDataException("Start date and end date cannot be null");
-    }
-    if (startDate.isAfter(endDate)) {
-      throw new MarketDataException("Start date cannot be after end date");
-    }
-    if (startDate.isAfter(LocalDate.now())) {
-      throw new MarketDataException("Start date cannot be in the future");
-    }
-  }
+  // ===== PRIVATE HELPER METHODS =====
   
   private BigDecimal fetchLatestYieldForSeries(String seriesId) {
     try {
@@ -381,19 +361,6 @@ public class FredApiClient {
     }
     
     return builder.build().toUriString();
-  }
-  
-  private BigDecimal parseYieldValue(String value) {
-    if (value == null || value.trim().isEmpty() || ".".equals(value)) {
-      return null;
-    }
-    
-    try {
-      return new BigDecimal(value);
-    } catch (NumberFormatException e) {
-      logger.warn("Unable to parse yield value: {}", value);
-      return null;
-    }
   }
   
   private List<MarketData> convertToMarketDataList(FredApiResponse response, String tenor) {
