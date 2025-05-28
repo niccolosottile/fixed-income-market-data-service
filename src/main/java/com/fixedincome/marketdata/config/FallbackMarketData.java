@@ -48,15 +48,17 @@ public final class FallbackMarketData {
 
     // Euro area yield curve
     Map<String, BigDecimal> euroArea = new HashMap<>();
+    euroArea.put("1M", new BigDecimal("3.75"));
     euroArea.put("3M", new BigDecimal("3.72"));
     euroArea.put("6M", new BigDecimal("3.51"));
     euroArea.put("1Y", new BigDecimal("3.40"));
     euroArea.put("2Y", new BigDecimal("3.15"));
+    euroArea.put("3Y", new BigDecimal("3.10"));
     euroArea.put("5Y", new BigDecimal("2.92"));
     euroArea.put("7Y", new BigDecimal("2.89"));
     euroArea.put("10Y", new BigDecimal("3.05"));
     euroArea.put("20Y", new BigDecimal("3.31"));
-    euroArea.put("30Y", new BigDecimal("3.30"));
+    euroArea.put("30Y", new BigDecimal("3.45"));
     curves.put("EUR", euroArea);
 
     // UK yield curve
@@ -66,7 +68,9 @@ public final class FallbackMarketData {
     ukGilts.put("6M", new BigDecimal("4.95"));
     ukGilts.put("1Y", new BigDecimal("4.65"));
     ukGilts.put("2Y", new BigDecimal("4.35"));
+    ukGilts.put("3Y", new BigDecimal("4.20"));
     ukGilts.put("5Y", new BigDecimal("4.10"));
+    ukGilts.put("7Y", new BigDecimal("4.12"));
     ukGilts.put("10Y", new BigDecimal("4.15"));
     ukGilts.put("20Y", new BigDecimal("4.40"));
     ukGilts.put("30Y", new BigDecimal("4.35"));
@@ -79,7 +83,9 @@ public final class FallbackMarketData {
     japanJgbs.put("6M", new BigDecimal("0.15"));
     japanJgbs.put("1Y", new BigDecimal("0.20"));
     japanJgbs.put("2Y", new BigDecimal("0.28"));
+    japanJgbs.put("3Y", new BigDecimal("0.35"));
     japanJgbs.put("5Y", new BigDecimal("0.59"));
+    japanJgbs.put("7Y", new BigDecimal("0.75"));
     japanJgbs.put("10Y", new BigDecimal("0.95"));
     japanJgbs.put("20Y", new BigDecimal("1.70"));
     japanJgbs.put("30Y", new BigDecimal("1.90"));
