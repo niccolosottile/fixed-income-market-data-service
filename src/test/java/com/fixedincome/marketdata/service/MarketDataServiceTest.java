@@ -1,6 +1,5 @@
 package com.fixedincome.marketdata.service;
 
-import com.fixedincome.marketdata.config.FallbackMarketData;
 import com.fixedincome.marketdata.dto.YieldCurveResponse;
 import com.fixedincome.marketdata.model.MarketData;
 import com.fixedincome.marketdata.service.integration.MarketDataProvider;
@@ -20,8 +19,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,21 +27,26 @@ import static org.mockito.Mockito.*;
 class MarketDataServiceTest {
 
   @Mock
-  private MarketDataProvider fredProvider;
-
+  private MarketDataDatabaseService databaseService;
   @Mock
-  private MarketDataProvider alternativeProvider;
+  private MarketDataProviderService providerService;
+  @Mock
+  private MarketDataFallbackService fallbackService;
+  @Mock
+  private MarketDataProvider fredProvider;
 
   private MarketDataService marketDataService;
 
   @BeforeEach
   void setUp() {
-    // Use lenient stubbing to avoid UnnecessaryStubbingException
-    lenient().when(fredProvider.getProviderName()).thenReturn("FRED");
-    lenient().when(alternativeProvider.getProviderName()).thenReturn("ALTERNATIVE_API");
     lenient().when(fredProvider.getSupportedTenors()).thenReturn(Set.of("1Y", "2Y", "5Y", "10Y", "30Y"));
     
-    marketDataService = new MarketDataService(fredProvider, Optional.of(alternativeProvider));
+    marketDataService = new MarketDataService(
+      databaseService,
+      providerService,
+      fallbackService,
+      fredProvider
+    );
   }
 
   @Nested
@@ -51,12 +54,30 @@ class MarketDataServiceTest {
   class YieldCurveOperationsTest {
 
     @Test
-    @DisplayName("Should get latest yield curve from FRED when healthy")
+    @DisplayName("Should get latest yield curve from database when available")
     void testGetLatestYieldCurve_WithHealthyFredProvider() {
-      // Given
-      YieldCurveResponse expectedResponse = createMockYieldCurveResponse("FRED", LocalDate.now());
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
-      when(fredProvider.fetchLatestYieldCurve()).thenReturn(expectedResponse);
+      // Given - Database has data
+      YieldCurveResponse dbResponse = createMockYieldCurveResponse("DATABASE");
+      when(databaseService.getLatestYieldCurve()).thenReturn(Optional.of(dbResponse));
+
+      // When
+      YieldCurveResponse result = marketDataService.getLatestYieldCurve();
+
+      // Then
+      assertNotNull(result);
+      assertEquals("DATABASE", result.getSource());
+      verify(databaseService).getLatestYieldCurve();
+      verify(providerService, never()).fetchLatestYieldCurve();
+      verify(fallbackService, never()).createFallbackYieldCurve();
+    }
+
+    @Test
+    @DisplayName("Should fallback to providers when database empty")
+    void testGetLatestYieldCurve_FallbackToAlternativeProvider() {
+      // Given - Database empty, provider has data
+      when(databaseService.getLatestYieldCurve()).thenReturn(Optional.empty());
+      YieldCurveResponse providerResponse = createMockYieldCurveResponse("FRED");
+      when(providerService.fetchLatestYieldCurve()).thenReturn(Optional.of(providerResponse));
 
       // When
       YieldCurveResponse result = marketDataService.getLatestYieldCurve();
@@ -64,34 +85,19 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals("FRED", result.getSource());
-      assertEquals(LocalDate.now(), result.getDate());
-      verify(fredProvider).fetchLatestYieldCurve();
-      verify(alternativeProvider, never()).fetchLatestYieldCurve();
-    }
-
-    @Test
-    @DisplayName("Should fallback to alternative provider when FRED fails")
-    void testGetLatestYieldCurve_FallbackToAlternativeProvider() {
-      // Given
-      YieldCurveResponse expectedResponse = createMockYieldCurveResponse("ALTERNATIVE_API", LocalDate.now());
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.fetchLatestYieldCurve()).thenReturn(expectedResponse);
-
-      // When
-      YieldCurveResponse result = marketDataService.getLatestYieldCurve();
-
-      // Then
-      assertNotNull(result);
-      assertEquals("ALTERNATIVE_API", result.getSource());
-      verify(alternativeProvider).fetchLatestYieldCurve();
+      verify(databaseService).getLatestYieldCurve();
+      verify(providerService).fetchLatestYieldCurve();
+      verify(databaseService).storeYieldCurve(providerResponse); // Should store in DB
     }
 
     @Test
     @DisplayName("Should use fallback data when all providers fail")
     void testGetLatestYieldCurve_FallbackToStaticData() {
-      // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.fetchLatestYieldCurve()).thenThrow(new RuntimeException("API down"));
+      // Given - All services fail or return empty
+      when(databaseService.getLatestYieldCurve()).thenReturn(Optional.empty());
+      when(providerService.fetchLatestYieldCurve()).thenReturn(Optional.empty());
+      YieldCurveResponse fallbackResponse = createMockYieldCurveResponse("FALLBACK");
+      when(fallbackService.createFallbackYieldCurve()).thenReturn(fallbackResponse);
 
       // When
       YieldCurveResponse result = marketDataService.getLatestYieldCurve();
@@ -99,8 +105,9 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals("FALLBACK", result.getSource());
-      assertNotNull(result.getYields());
-      assertTrue(result.getYields().containsKey("10Y"));
+      verify(databaseService).getLatestYieldCurve();
+      verify(providerService).fetchLatestYieldCurve();
+      verify(fallbackService).createFallbackYieldCurve();
     }
 
     @Test
@@ -108,18 +115,16 @@ class MarketDataServiceTest {
     void testGetHistoricalYieldCurve_Success() {
       // Given
       LocalDate testDate = LocalDate.of(2024, 1, 15);
-      YieldCurveResponse expectedResponse = createMockYieldCurveResponse("FRED", testDate);
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
-      when(fredProvider.fetchHistoricalYieldCurve(testDate)).thenReturn(expectedResponse);
+      YieldCurveResponse dbResponse = createMockYieldCurveResponse("DATABASE");
+      when(databaseService.getHistoricalYieldCurve(testDate)).thenReturn(Optional.of(dbResponse));
 
       // When
       YieldCurveResponse result = marketDataService.getHistoricalYieldCurve(testDate);
 
       // Then
       assertNotNull(result);
-      assertEquals("FRED", result.getSource());
-      assertEquals(testDate, result.getDate());
-      verify(fredProvider).fetchHistoricalYieldCurve(testDate);
+      assertEquals("DATABASE", result.getSource());
+      verify(databaseService).getHistoricalYieldCurve(testDate);
     }
 
     @Test
@@ -127,11 +132,10 @@ class MarketDataServiceTest {
     void testGetYieldCurvesForDates_Success() {
       // Given
       List<LocalDate> dates = List.of(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 2));
-      List<YieldCurveResponse> expectedResponses = dates.stream()
-        .map(date -> createMockYieldCurveResponse("FRED", date))
+      List<YieldCurveResponse> dbResponses = dates.stream()
+        .map(date -> createMockYieldCurveResponse("DATABASE"))
         .toList();
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
-      when(fredProvider.fetchYieldCurvesForDates(dates)).thenReturn(expectedResponses);
+      when(databaseService.getYieldCurvesForDates(dates)).thenReturn(dbResponses);
 
       // When
       List<YieldCurveResponse> result = marketDataService.getYieldCurvesForDates(dates);
@@ -139,8 +143,8 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(2, result.size());
-      assertEquals("FRED", result.get(0).getSource());
-      verify(fredProvider).fetchYieldCurvesForDates(dates);
+      assertEquals("DATABASE", result.get(0).getSource());
+      verify(databaseService).getYieldCurvesForDates(dates);
     }
 
     @Test
@@ -150,9 +154,8 @@ class MarketDataServiceTest {
       String tenor = "10Y";
       LocalDate startDate = LocalDate.of(2024, 1, 1);
       LocalDate endDate = LocalDate.of(2024, 1, 31);
-      List<MarketData> expectedData = List.of(createMockMarketData(tenor, new BigDecimal("4.25")));
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
-      when(fredProvider.fetchYieldTimeSeries(tenor, startDate, endDate)).thenReturn(expectedData);
+      List<MarketData> dbData = List.of(createMockMarketData("10Y", new BigDecimal("4.25")));
+      when(databaseService.getYieldTimeSeries(tenor, startDate, endDate)).thenReturn(dbData);
 
       // When
       List<MarketData> result = marketDataService.getYieldTimeSeries(tenor, startDate, endDate);
@@ -160,8 +163,8 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(1, result.size());
-      assertEquals(tenor, result.get(0).getTenor());
-      verify(fredProvider).fetchYieldTimeSeries(tenor, startDate, endDate);
+      assertEquals("DATABASE", result.get(0).getSource());
+      verify(databaseService).getYieldTimeSeries(tenor, startDate, endDate);
     }
 
     @Test
@@ -171,9 +174,8 @@ class MarketDataServiceTest {
       String tenor = "10Y";
       LocalDate startDate = LocalDate.of(2024, 1, 1);
       LocalDate endDate = LocalDate.of(2024, 1, 31);
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.fetchYieldTimeSeries(anyString(), any(), any()))
-        .thenThrow(new RuntimeException("API down"));
+      when(databaseService.getYieldTimeSeries(tenor, startDate, endDate)).thenReturn(List.of());
+      when(providerService.fetchYieldTimeSeries(tenor, startDate, endDate)).thenReturn(Optional.empty());
 
       // When
       List<MarketData> result = marketDataService.getYieldTimeSeries(tenor, startDate, endDate);
@@ -189,37 +191,37 @@ class MarketDataServiceTest {
   class CreditAndSpreadOperationsTest {
 
     @Test
-    @DisplayName("Should get credit spreads from alternative provider")
+    @DisplayName("Should get credit spreads from database first")
     void testGetCreditSpreads_Success() {
       // Given
-      Map<String, BigDecimal> expectedSpreads = Map.of(
-        "AAA", new BigDecimal("25"),
-        "BBB", new BigDecimal("150")
-      );
-      when(alternativeProvider.fetchCreditSpreads()).thenReturn(expectedSpreads);
+      Map<String, BigDecimal> dbSpreads = Map.of("BBB", new BigDecimal("150"));
+      when(databaseService.getLatestCreditSpreads()).thenReturn(Optional.of(dbSpreads));
 
       // When
       Map<String, BigDecimal> result = marketDataService.getCreditSpreads();
 
       // Then
       assertNotNull(result);
-      assertEquals(new BigDecimal("25"), result.get("AAA"));
       assertEquals(new BigDecimal("150"), result.get("BBB"));
-      verify(alternativeProvider).fetchCreditSpreads();
+      verify(databaseService).getLatestCreditSpreads();
+      verify(providerService, never()).fetchCreditSpreads();
     }
 
     @Test
     @DisplayName("Should use fallback credit spreads when provider fails")
     void testGetCreditSpreads_Fallback() {
       // Given
-      when(alternativeProvider.fetchCreditSpreads()).thenThrow(new RuntimeException("API down"));
+      when(databaseService.getLatestCreditSpreads()).thenReturn(Optional.empty());
+      when(providerService.fetchCreditSpreads()).thenReturn(Optional.empty());
+      Map<String, BigDecimal> fallbackSpreads = Map.of("BBB", new BigDecimal("150"));
+      when(fallbackService.getFallbackCreditSpreads()).thenReturn(fallbackSpreads);
 
       // When
       Map<String, BigDecimal> result = marketDataService.getCreditSpreads();
 
       // Then
       assertNotNull(result);
-      assertEquals(FallbackMarketData.CREDIT_SPREADS.get("BBB"), result.get("BBB"));
+      assertEquals(new BigDecimal("150"), result.get("BBB"));
     }
 
     @Test
@@ -227,8 +229,8 @@ class MarketDataServiceTest {
     void testGetInflationExpectations_Success() {
       // Given
       String region = "US";
-      Map<String, BigDecimal> expectedExpectations = Map.of("10Y", new BigDecimal("2.5"));
-      when(alternativeProvider.fetchInflationExpectations(region)).thenReturn(expectedExpectations);
+      Map<String, BigDecimal> expectations = Map.of("10Y", new BigDecimal("2.5"));
+      when(providerService.fetchInflationExpectations(region)).thenReturn(Optional.of(expectations));
 
       // When
       Map<String, BigDecimal> result = marketDataService.getInflationExpectations(region);
@@ -236,15 +238,15 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(new BigDecimal("2.5"), result.get("10Y"));
-      verify(alternativeProvider).fetchInflationExpectations(region);
+      verify(providerService).fetchInflationExpectations(region);
     }
 
     @Test
     @DisplayName("Should get benchmark rates")
     void testGetBenchmarkRates_Success() {
       // Given
-      Map<String, BigDecimal> expectedRates = Map.of("US", new BigDecimal("5.25"));
-      when(alternativeProvider.fetchBenchmarkRates()).thenReturn(expectedRates);
+      Map<String, BigDecimal> dbRates = Map.of("US", new BigDecimal("5.25"));
+      when(databaseService.getLatestBenchmarkRates()).thenReturn(Optional.of(dbRates));
 
       // When
       Map<String, BigDecimal> result = marketDataService.getBenchmarkRates();
@@ -252,7 +254,7 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(new BigDecimal("5.25"), result.get("US"));
-      verify(alternativeProvider).fetchBenchmarkRates();
+      verify(databaseService).getLatestBenchmarkRates();
     }
 
     @Test
@@ -260,8 +262,8 @@ class MarketDataServiceTest {
     void testGetSectorCreditData_Success() {
       // Given
       String sector = "TECH";
-      Map<String, BigDecimal> expectedData = Map.of("BBB", new BigDecimal("120"));
-      when(alternativeProvider.fetchSectorCreditData(sector)).thenReturn(expectedData);
+      Map<String, BigDecimal> sectorData = Map.of("BBB", new BigDecimal("120"));
+      when(providerService.fetchSectorCreditData(sector)).thenReturn(Optional.of(sectorData));
 
       // When
       Map<String, BigDecimal> result = marketDataService.getSectorCreditData(sector);
@@ -269,15 +271,15 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(new BigDecimal("120"), result.get("BBB"));
-      verify(alternativeProvider).fetchSectorCreditData(sector);
+      verify(providerService).fetchSectorCreditData(sector);
     }
 
     @Test
     @DisplayName("Should get liquidity premiums")
     void testGetLiquidityPremiums_Success() {
       // Given
-      Map<String, BigDecimal> expectedPremiums = Map.of("CORPORATE", new BigDecimal("15"));
-      when(alternativeProvider.fetchLiquidityPremiums()).thenReturn(expectedPremiums);
+      Map<String, BigDecimal> premiums = Map.of("CORPORATE", new BigDecimal("15"));
+      when(providerService.fetchLiquidityPremiums()).thenReturn(Optional.of(premiums));
 
       // When
       Map<String, BigDecimal> result = marketDataService.getLiquidityPremiums();
@@ -285,7 +287,7 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(new BigDecimal("15"), result.get("CORPORATE"));
-      verify(alternativeProvider).fetchLiquidityPremiums();
+      verify(providerService).fetchLiquidityPremiums();
     }
   }
 
@@ -299,16 +301,16 @@ class MarketDataServiceTest {
       // Given
       String tenor = "10Y";
       String region = "EUR";
-      YieldCurveResponse mockCurve = createMockYieldCurveResponse("FRED", LocalDate.now());
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
-      when(fredProvider.fetchLatestYieldCurve()).thenReturn(mockCurve);
+      when(databaseService.getYieldForTenor(tenor, LocalDate.now()))
+        .thenReturn(Optional.of(new BigDecimal("4.25")));
 
       // When
       BigDecimal result = marketDataService.getYieldForTenor(tenor, region);
 
       // Then
       assertNotNull(result);
-      assertEquals(new BigDecimal("4.23"), result);
+      assertEquals(new BigDecimal("4.25"), result);
+      verify(databaseService).getYieldForTenor(tenor, LocalDate.now());
     }
 
     @Test
@@ -317,15 +319,16 @@ class MarketDataServiceTest {
       // Given
       String tenor = "10Y";
       String region = "EUR";
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.fetchLatestYieldCurve()).thenThrow(new RuntimeException("API down"));
+      when(databaseService.getYieldForTenor(tenor, LocalDate.now())).thenReturn(Optional.empty());
+      when(fallbackService.getFallbackYieldForTenor(tenor, region)).thenReturn(new BigDecimal("4.00"));
 
       // When
       BigDecimal result = marketDataService.getYieldForTenor(tenor, region);
 
       // Then
       assertNotNull(result);
-      assertEquals(FallbackMarketData.YIELD_CURVES.get("EUR").get("10Y"), result);
+      assertEquals(new BigDecimal("4.00"), result);
+      verify(fallbackService).getFallbackYieldForTenor(tenor, region);
     }
 
     @Test
@@ -333,8 +336,8 @@ class MarketDataServiceTest {
     void testGetCreditSpreadForRating_Success() {
       // Given
       String rating = "BBB";
-      Map<String, BigDecimal> mockSpreads = Map.of("BBB", new BigDecimal("150"));
-      when(alternativeProvider.fetchCreditSpreads()).thenReturn(mockSpreads);
+      when(databaseService.getCreditSpreadForRating(rating))
+        .thenReturn(Optional.of(new BigDecimal("150")));
 
       // When
       BigDecimal result = marketDataService.getCreditSpreadForRating(rating);
@@ -342,6 +345,7 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(new BigDecimal("150"), result);
+      verify(databaseService).getCreditSpreadForRating(rating);
     }
 
     @Test
@@ -349,8 +353,8 @@ class MarketDataServiceTest {
     void testGetBenchmarkRateForRegion_Success() {
       // Given
       String region = "US";
-      Map<String, BigDecimal> mockRates = Map.of("US", new BigDecimal("5.25"));
-      when(alternativeProvider.fetchBenchmarkRates()).thenReturn(mockRates);
+      when(databaseService.getBenchmarkRateForRegion(region))
+        .thenReturn(Optional.of(new BigDecimal("5.25")));
 
       // When
       BigDecimal result = marketDataService.getBenchmarkRateForRegion(region);
@@ -358,6 +362,7 @@ class MarketDataServiceTest {
       // Then
       assertNotNull(result);
       assertEquals(new BigDecimal("5.25"), result);
+      verify(databaseService).getBenchmarkRateForRegion(region);
     }
   }
 
@@ -366,24 +371,24 @@ class MarketDataServiceTest {
   class MetadataAndHealthTest {
 
     @Test
-    @DisplayName("Should indicate market data available when FRED is healthy")
+    @DisplayName("Should indicate market data available when providers healthy")
     void testIsMarketDataAvailable_WithHealthyFredProvider() {
       // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
+      when(providerService.isAnyProviderHealthy()).thenReturn(true);
 
       // When
       boolean result = marketDataService.isMarketDataAvailable();
 
       // Then
       assertTrue(result);
+      verify(providerService).isAnyProviderHealthy();
     }
 
     @Test
     @DisplayName("Should indicate market data available when alternative is healthy")
     void testIsMarketDataAvailable_WithHealthyAlternativeProvider() {
       // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.isServiceHealthy()).thenReturn(true);
+      when(providerService.isAnyProviderHealthy()).thenReturn(true);
 
       // When
       boolean result = marketDataService.isMarketDataAvailable();
@@ -396,8 +401,7 @@ class MarketDataServiceTest {
     @DisplayName("Should indicate market data unavailable when all providers unhealthy")
     void testIsMarketDataAvailable_WithNoHealthyProviders() {
       // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.isServiceHealthy()).thenReturn(false);
+      when(providerService.isAnyProviderHealthy()).thenReturn(false);
 
       // When
       boolean result = marketDataService.isMarketDataAvailable();
@@ -422,8 +426,8 @@ class MarketDataServiceTest {
     @DisplayName("Should get provider health status")
     void testGetProviderHealthStatus() {
       // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(true);
-      when(alternativeProvider.isServiceHealthy()).thenReturn(false);
+      Map<String, Boolean> healthStatus = Map.of("FRED", true, "ALTERNATIVE", false);
+      when(providerService.getProviderHealthStatus()).thenReturn(healthStatus);
 
       // When
       Map<String, Boolean> result = marketDataService.getProviderHealthStatus();
@@ -432,7 +436,7 @@ class MarketDataServiceTest {
       assertNotNull(result);
       assertEquals(2, result.size());
       assertTrue(result.get("FRED"));
-      assertFalse(result.get("ALTERNATIVE_API"));
+      assertFalse(result.get("ALTERNATIVE"));
     }
   }
 
@@ -444,43 +448,44 @@ class MarketDataServiceTest {
     @DisplayName("Should handle null region gracefully")
     void testGetYieldForTenor_WithNullRegion() {
       // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.fetchLatestYieldCurve()).thenThrow(new RuntimeException("API down"));
+      when(databaseService.getYieldForTenor("10Y", LocalDate.now())).thenReturn(Optional.empty());
+      when(fallbackService.getFallbackYieldForTenor("10Y", null)).thenReturn(new BigDecimal("4.00"));
 
       // When
       BigDecimal result = marketDataService.getYieldForTenor("10Y", null);
 
       // Then
       assertNotNull(result);
-      // Should default to EUR when region is null
-      assertEquals(FallbackMarketData.YIELD_CURVES.get("EUR").get("10Y"), result);
+      assertEquals(new BigDecimal("4.00"), result);
     }
 
     @Test
     @DisplayName("Should handle unsupported region gracefully")
     void testGetYieldForTenor_WithUnsupportedRegion() {
       // Given
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
-      when(alternativeProvider.fetchLatestYieldCurve()).thenThrow(new RuntimeException("API down"));
+      when(databaseService.getYieldForTenor("10Y", LocalDate.now())).thenReturn(Optional.empty());
+      when(fallbackService.getFallbackYieldForTenor("10Y", "UNSUPPORTED")).thenReturn(new BigDecimal("4.00"));
 
       // When
       BigDecimal result = marketDataService.getYieldForTenor("10Y", "UNSUPPORTED");
 
       // Then
       assertNotNull(result);
-      // Should default to EUR when region is not found
-      assertEquals(FallbackMarketData.YIELD_CURVES.get("EUR").get("10Y"), result);
+      assertEquals(new BigDecimal("4.00"), result);
     }
 
     @Test
     @DisplayName("Should handle service without alternative provider")
     void testServiceWithoutAlternativeProvider() {
-      // Given
-      MarketDataService serviceWithoutAlt = new MarketDataService(fredProvider, Optional.empty());
-      when(fredProvider.isServiceHealthy()).thenReturn(false);
+      // This test verifies that the service works when constructed with the layered architecture
+      // and properly delegates to fallback when all providers fail
+      YieldCurveResponse fallbackResponse = createMockYieldCurveResponse("FALLBACK");
+      when(databaseService.getLatestYieldCurve()).thenReturn(Optional.empty());
+      when(providerService.fetchLatestYieldCurve()).thenReturn(Optional.empty());
+      when(fallbackService.createFallbackYieldCurve()).thenReturn(fallbackResponse);
 
       // When
-      YieldCurveResponse result = serviceWithoutAlt.getLatestYieldCurve();
+      YieldCurveResponse result = marketDataService.getLatestYieldCurve();
 
       // Then
       assertNotNull(result);
@@ -489,9 +494,9 @@ class MarketDataServiceTest {
   }
 
   // Helper methods for creating test data
-  private YieldCurveResponse createMockYieldCurveResponse(String source, LocalDate date) {
+  private YieldCurveResponse createMockYieldCurveResponse(String source) {
     return YieldCurveResponse.builder()
-      .date(date)
+      .date(LocalDate.now())
       .source(source)
       .yields(Map.of(
         "1Y", new BigDecimal("3.50"),
@@ -509,7 +514,7 @@ class MarketDataServiceTest {
       .dataKey(tenor)
       .dataValue(value)
       .dataDate(LocalDate.now())
-      .source("FRED")
+      .source("DATABASE")
       .currency("EUR")
       .tenor(tenor)
       .build();
