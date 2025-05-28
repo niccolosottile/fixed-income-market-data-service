@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Service that orchestrates calls to different market data providers.
@@ -313,5 +314,12 @@ public class MarketDataProviderService {
     }
     
     return status;
+  }
+
+  /**
+   * Get supported tenors from primary provider
+   */
+  public Set<String> getSupportedTenors() {
+    return fredProvider.getSupportedTenors();
   }
 }

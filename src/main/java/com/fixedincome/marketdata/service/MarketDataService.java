@@ -2,10 +2,9 @@ package com.fixedincome.marketdata.service;
 
 import com.fixedincome.marketdata.dto.YieldCurveResponse;
 import com.fixedincome.marketdata.model.MarketData;
-import com.fixedincome.marketdata.service.integration.MarketDataProvider;
+import com.fixedincome.marketdata.util.ValidationUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
@@ -29,17 +28,14 @@ public class MarketDataService {
   private final MarketDataDatabaseService databaseService;
   private final MarketDataProviderService providerService;
   private final MarketDataFallbackService fallbackService;
-  private final MarketDataProvider fredProvider; // For metadata operations
 
   public MarketDataService(
     MarketDataDatabaseService databaseService,
     MarketDataProviderService providerService,
-    MarketDataFallbackService fallbackService,
-    @Qualifier("fredApiClient") MarketDataProvider fredProvider) {
+    MarketDataFallbackService fallbackService) {
     this.databaseService = databaseService;
     this.providerService = providerService;
     this.fallbackService = fallbackService;
-    this.fredProvider = fredProvider;
     logger.info("MarketDataService initialized with layered architecture");
   }
 
@@ -106,6 +102,8 @@ public class MarketDataService {
    */
   @Cacheable(value = "yieldCurvesBatch", key = "#dates.toString()")
   public List<YieldCurveResponse> getYieldCurvesForDates(List<LocalDate> dates) {
+    ValidationUtils.validateDates(dates);
+
     // Try database first
     List<YieldCurveResponse> dbResults = databaseService.getYieldCurvesForDates(dates);
     if (!dbResults.isEmpty() && dbResults.size() == dates.size()) {
@@ -132,8 +130,11 @@ public class MarketDataService {
   /**
    * Get time series of yield data for a specific tenor
    */
-  @Cacheable(value = "yieldTimeSeries", key = "#tenor + '_' + #startDate + '_' + #endDate")
+  @Cacheable(value = "yieldTimeSeries", key = "#tenor + '_' + #startDate + '_' + #endDate", cacheManager = "timeSeriesCacheManager")
   public List<MarketData> getYieldTimeSeries(String tenor, LocalDate startDate, LocalDate endDate) {
+    ValidationUtils.validateTenor(tenor);
+    ValidationUtils.validateDateRange(startDate, endDate);
+
     // Try database first
     List<MarketData> dbResults = databaseService.getYieldTimeSeries(tenor, startDate, endDate);
     if (!dbResults.isEmpty()) {
@@ -190,6 +191,8 @@ public class MarketDataService {
    */
   @Cacheable(value = "inflationExpectations", key = "#region")
   public Map<String, BigDecimal> getInflationExpectations(String region) {
+    ValidationUtils.validateRegion(region);
+
     // Try providers
     Optional<Map<String, BigDecimal>> providerResult = providerService.fetchInflationExpectations(region);
     if (providerResult.isPresent()) {
@@ -237,6 +240,8 @@ public class MarketDataService {
    */
   @Cacheable(value = "sectorCreditData", key = "#sector")
   public Map<String, BigDecimal> getSectorCreditData(String sector) {
+    ValidationUtils.validateSector(sector);
+
     // Try providers
     Optional<Map<String, BigDecimal>> providerResult = providerService.fetchSectorCreditData(sector);
     if (providerResult.isPresent()) {
@@ -275,6 +280,9 @@ public class MarketDataService {
    * Get yield for specific tenor
    */
   public BigDecimal getYieldForTenor(String tenor, String region) {
+    ValidationUtils.validateTenor(tenor);
+    ValidationUtils.validateRegion(region);
+    
     // Try database first
     Optional<BigDecimal> dbResult = databaseService.getYieldForTenor(tenor, LocalDate.now());
     if (dbResult.isPresent()) {
@@ -303,6 +311,8 @@ public class MarketDataService {
    * Get credit spread for specific rating
    */
   public BigDecimal getCreditSpreadForRating(String rating) {
+    ValidationUtils.validateRating(rating);
+
     // Try database first
     Optional<BigDecimal> dbResult = databaseService.getCreditSpreadForRating(rating);
     if (dbResult.isPresent()) {
@@ -331,6 +341,8 @@ public class MarketDataService {
    * Get benchmark rate for specific region
    */
   public BigDecimal getBenchmarkRateForRegion(String region) {
+    ValidationUtils.validateRegion(region);
+    
     // Try database first
     Optional<BigDecimal> dbResult = databaseService.getBenchmarkRateForRegion(region);
     if (dbResult.isPresent()) {
@@ -368,7 +380,7 @@ public class MarketDataService {
    * Get supported tenors from providers
    */
   public Set<String> getSupportedTenors() {
-    return fredProvider.getSupportedTenors();
+    return providerService.getSupportedTenors();
   }
 
   /**

@@ -138,6 +138,7 @@ public class MarketDataDatabaseService {
   /**
    * Retrieve latest credit spreads from database
    */
+  @SuppressWarnings("unused")
   public Optional<Map<String, BigDecimal>> getLatestCreditSpreads() {
     try {
       List<MarketData> latestData = marketDataRepository.findLatestByDataTypeAsOfDate(
@@ -185,6 +186,7 @@ public class MarketDataDatabaseService {
   /**
    * Retrieve latest benchmark rates from database
    */
+  @SuppressWarnings("unused")
   public Optional<Map<String, BigDecimal>> getLatestBenchmarkRates() {
     try {
       List<MarketData> latestData = marketDataRepository.findLatestByDataTypeAsOfDate(
@@ -268,6 +270,7 @@ public class MarketDataDatabaseService {
 
   // ===== PRIVATE HELPER METHODS =====
 
+  @SuppressWarnings("unused")
   private Optional<YieldCurveResponse> buildYieldCurveFromMarketData(List<MarketData> marketDataList) {
     if (marketDataList.isEmpty()) {
       return Optional.empty();

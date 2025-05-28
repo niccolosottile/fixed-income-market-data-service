@@ -1,8 +1,8 @@
 package com.fixedincome.marketdata.service;
 
 import com.fixedincome.marketdata.dto.YieldCurveResponse;
+import com.fixedincome.marketdata.exception.DataValidationException;
 import com.fixedincome.marketdata.model.MarketData;
-import com.fixedincome.marketdata.service.integration.MarketDataProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -19,7 +19,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,20 +31,18 @@ class MarketDataServiceTest {
   private MarketDataProviderService providerService;
   @Mock
   private MarketDataFallbackService fallbackService;
-  @Mock
-  private MarketDataProvider fredProvider;
 
   private MarketDataService marketDataService;
 
   @BeforeEach
   void setUp() {
-    lenient().when(fredProvider.getSupportedTenors()).thenReturn(Set.of("1Y", "2Y", "5Y", "10Y", "30Y"));
+    // Mock the getSupportedTenors method on the provider service instead
+    lenient().when(providerService.getSupportedTenors()).thenReturn(Set.of("1Y", "2Y", "5Y", "10Y", "30Y"));
     
     marketDataService = new MarketDataService(
       databaseService,
       providerService,
-      fallbackService,
-      fredProvider
+      fallbackService
     );
   }
 
@@ -132,6 +129,7 @@ class MarketDataServiceTest {
     void testGetYieldCurvesForDates_Success() {
       // Given
       List<LocalDate> dates = List.of(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 2));
+      @SuppressWarnings("unused")
       List<YieldCurveResponse> dbResponses = dates.stream()
         .map(date -> createMockYieldCurveResponse("DATABASE"))
         .toList();
@@ -447,31 +445,23 @@ class MarketDataServiceTest {
     @Test
     @DisplayName("Should handle null region gracefully")
     void testGetYieldForTenor_WithNullRegion() {
-      // Given
-      when(databaseService.getYieldForTenor("10Y", LocalDate.now())).thenReturn(Optional.empty());
-      when(fallbackService.getFallbackYieldForTenor("10Y", null)).thenReturn(new BigDecimal("4.00"));
-
-      // When
-      BigDecimal result = marketDataService.getYieldForTenor("10Y", null);
-
-      // Then
-      assertNotNull(result);
-      assertEquals(new BigDecimal("4.00"), result);
+      // Given - null region should throw validation exception
+      
+      // When & Then
+      assertThrows(DataValidationException.class, () -> {
+        marketDataService.getYieldForTenor("10Y", null);
+      });
     }
 
     @Test
-    @DisplayName("Should handle unsupported region gracefully")
+    @DisplayName("Should throw validation exception for unsupported region")
     void testGetYieldForTenor_WithUnsupportedRegion() {
-      // Given
-      when(databaseService.getYieldForTenor("10Y", LocalDate.now())).thenReturn(Optional.empty());
-      when(fallbackService.getFallbackYieldForTenor("10Y", "UNSUPPORTED")).thenReturn(new BigDecimal("4.00"));
-
-      // When
-      BigDecimal result = marketDataService.getYieldForTenor("10Y", "UNSUPPORTED");
-
-      // Then
-      assertNotNull(result);
-      assertEquals(new BigDecimal("4.00"), result);
+      // Given - unsupported region should throw validation exception
+      
+      // When & Then
+      assertThrows(DataValidationException.class, () -> {
+        marketDataService.getYieldForTenor("10Y", "UNSUPPORTED");
+      });
     }
 
     @Test
