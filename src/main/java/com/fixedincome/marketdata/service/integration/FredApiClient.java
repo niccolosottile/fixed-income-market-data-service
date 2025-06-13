@@ -5,7 +5,6 @@ import com.fixedincome.marketdata.dto.FredApiResponse;
 import com.fixedincome.marketdata.dto.YieldCurveResponse;
 import com.fixedincome.marketdata.exception.MarketDataException;
 import com.fixedincome.marketdata.model.MarketData;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -26,18 +25,18 @@ public class FredApiClient extends AbstractMarketDataProvider {
   
   static {
     Map<String, String> series = new HashMap<>();
-    // Euro Area Government Bond yields from ECB
-    series.put("1M", "IRLTLT01EZM156N");
-    series.put("3M", "IRLTLT01EZQ156N"); 
-    series.put("6M", "IR3TIB01EZM156N");
-    series.put("1Y", "IRLTLT01EZA156N");
-    series.put("2Y", "IRLTLT02EZA156N");
-    series.put("3Y", "IRLTLT03EZA156N");
-    series.put("5Y", "IRLTLT05EZA156N");
-    series.put("7Y", "IRLTLT07EZA156N");
-    series.put("10Y", "IRLTLT10EZA156N");
-    series.put("20Y", "IRLTLT20EZA156N");
-    series.put("30Y", "IRLTLT30EZA156N");
+    // US Treasury yields (FRED series IDs)
+    series.put("1M", "DGS1MO");    // 1-Month Treasury
+    series.put("3M", "DGS3MO");    // 3-Month Treasury
+    series.put("6M", "DGS6MO");    // 6-Month Treasury
+    series.put("1Y", "DGS1");      // 1-Year Treasury
+    series.put("2Y", "DGS2");      // 2-Year Treasury
+    series.put("3Y", "DGS3");      // 3-Year Treasury
+    series.put("5Y", "DGS5");      // 5-Year Treasury
+    series.put("7Y", "DGS7");      // 7-Year Treasury
+    series.put("10Y", "DGS10");    // 10-Year Treasury
+    series.put("20Y", "DGS20");    // 20-Year Treasury
+    series.put("30Y", "DGS30");    // 30-Year Treasury
     YIELD_CURVE_SERIES = Collections.unmodifiableMap(series);
   }
   
@@ -76,7 +75,6 @@ public class FredApiClient extends AbstractMarketDataProvider {
    * Fetches the latest yield curve data from FRED
    * @return YieldCurveResponse with latest yield curve data
    */
-  @Cacheable(value = "yieldCurves", key = "'latest'")
   @Override
   public YieldCurveResponse fetchLatestYieldCurve() {
     logger.info("Fetching latest yield curve data from FRED");
@@ -123,7 +121,6 @@ public class FredApiClient extends AbstractMarketDataProvider {
    * @param date The date to fetch data for
    * @return YieldCurveResponse with historical yield curve data
    */
-  @Cacheable(value = "yieldCurves", key = "#date.toString()")
   @Override
   public YieldCurveResponse fetchHistoricalYieldCurve(LocalDate date) {
     logger.info("Fetching historical yield curve data for date: {}", date);
@@ -183,7 +180,6 @@ public class FredApiClient extends AbstractMarketDataProvider {
    * @param endDate End of the time period
    * @return List of yield data points
    */
-  @Cacheable(value = "yieldTimeSeries", key = "#tenor + '_' + #startDate + '_' + #endDate")
   @Override
   public List<MarketData> fetchYieldTimeSeries(String tenor, LocalDate startDate, LocalDate endDate) {
     logger.info("Fetching yield time series for tenor {} from {} to {}", tenor, startDate, endDate);
@@ -216,7 +212,6 @@ public class FredApiClient extends AbstractMarketDataProvider {
    * @param dates List of dates to fetch data for
    * @return List of YieldCurveResponse objects
    */
-  @Cacheable(value = "yieldCurvesBatch", key = "#dates.toString()")
   @Override
   public List<YieldCurveResponse> fetchYieldCurvesForDates(List<LocalDate> dates) {
     logger.info("Fetching yield curves for {} dates", dates.size());

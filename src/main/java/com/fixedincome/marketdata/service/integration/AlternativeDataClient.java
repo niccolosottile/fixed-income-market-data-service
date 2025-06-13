@@ -6,7 +6,6 @@ import com.fixedincome.marketdata.dto.YieldCurveResponse;
 import com.fixedincome.marketdata.exception.MarketDataException;
 import com.fixedincome.marketdata.model.MarketData;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -79,7 +78,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   /**
    * Fetches the latest yield curve data from Alternative API
    */
-  @Cacheable(value = "yieldCurves", key = "'alternative_latest'")
   @Override
   public YieldCurveResponse fetchLatestYieldCurve() {
     logger.info("Fetching latest yield curve data from Alternative API");
@@ -99,7 +97,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   /**
    * Fetches historical yield curve data for a specific date
    */
-  @Cacheable(value = "yieldCurves", key = "'alternative_' + #date.toString()")
   @Override
   public YieldCurveResponse fetchHistoricalYieldCurve(LocalDate date) {
     logger.info("Fetching historical yield curve data for date: {}", date);
@@ -118,7 +115,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   /**
    * Fetches yield time series data
    */
-  @Cacheable(value = "yieldTimeSeries", key = "'alternative_' + #tenor + '_' + #startDate + '_' + #endDate")
   @Override
   public List<MarketData> fetchYieldTimeSeries(String tenor, LocalDate startDate, LocalDate endDate) {
     logger.info("Fetching yield time series for tenor {} from {} to {}", tenor, startDate, endDate);
@@ -138,7 +134,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   /**
    * Fetches multiple yield curves for batch processing
    */
-  @Cacheable(value = "yieldCurvesBatch", key = "'alternative_' + #dates.toString()")
   @Override
   public List<YieldCurveResponse> fetchYieldCurvesForDates(List<LocalDate> dates) {
     logger.info("Fetching yield curves for {} dates", dates.size());
@@ -156,7 +151,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   /**
    * Fetches credit spreads by rating
    */
-  @Cacheable(value = "creditSpreads", key = "'alternative_credit_spreads'")
   @Override
   public Map<String, BigDecimal> fetchCreditSpreads() {
     if (!properties.isEnabled()) {
@@ -186,7 +180,6 @@ public class AlternativeDataClient extends AbstractMarketDataProvider {
   /**
    * Fetches benchmark rates for different regions
    */
-  @Cacheable(value = "benchmarkRates", key = "'alternative_benchmark_rates'")
   @Override
   public Map<String, BigDecimal> fetchBenchmarkRates() {
     return new HashMap<>(FallbackMarketData.BENCHMARK_RATES);

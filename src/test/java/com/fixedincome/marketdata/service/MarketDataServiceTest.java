@@ -31,6 +31,8 @@ class MarketDataServiceTest {
   private MarketDataProviderService providerService;
   @Mock
   private MarketDataFallbackService fallbackService;
+  @Mock
+  private CacheManagementService cacheManagementService;
 
   private MarketDataService marketDataService;
 
@@ -42,7 +44,8 @@ class MarketDataServiceTest {
     marketDataService = new MarketDataService(
       databaseService,
       providerService,
-      fallbackService
+      fallbackService,
+      cacheManagementService
     );
   }
 

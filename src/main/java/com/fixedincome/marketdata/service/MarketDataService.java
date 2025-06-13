@@ -28,14 +28,17 @@ public class MarketDataService {
   private final MarketDataDatabaseService databaseService;
   private final MarketDataProviderService providerService;
   private final MarketDataFallbackService fallbackService;
+  private final CacheManagementService cacheManagementService;
 
   public MarketDataService(
     MarketDataDatabaseService databaseService,
     MarketDataProviderService providerService,
-    MarketDataFallbackService fallbackService) {
+    MarketDataFallbackService fallbackService,
+    CacheManagementService cacheManagementService) {
     this.databaseService = databaseService;
     this.providerService = providerService;
     this.fallbackService = fallbackService;
+    this.cacheManagementService = cacheManagementService;
     logger.info("MarketDataService initialized with layered architecture");
   }
 
@@ -391,12 +394,42 @@ public class MarketDataService {
   }
 
   /**
-   * Manual data refresh - clears cache and forces provider fetch
+   * Manual data refresh - clears cache and database, forces fresh provider fetch
    */
   public void refreshMarketData() {
-    logger.info("Manual market data refresh initiated");
-    // This would typically involve cache eviction and triggering fresh data fetch
-    // Implementation depends on cache configuration
+    logger.info("Manual market data refresh initiated - clearing caches and database");
+    
+    // Clear all caches
+    clearAllCaches();
+  
+    // Clear all database data (including today's data)
+    clearAllDatabaseData();
+    
+    logger.info("Market data refresh complete - next requests will hit providers");
+  }
+
+  /**
+   * Clear all cached data across all cache managers
+   */
+  public void clearAllCaches() {
+    cacheManagementService.clearAllCaches();
+  }
+
+  /**
+   * Clear all data from database (including today's data)
+   */
+  public void clearAllDatabaseData() {
+    logger.info("Clearing all database data including today's records");
+    // Use tomorrow's date to ensure today's data is also deleted
+    LocalDate futureDate = LocalDate.now().plusDays(1);
+    databaseService.cleanOldData(futureDate);
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  public CacheManagementService.CacheStatistics getCacheStatistics() {
+    return cacheManagementService.getCacheStatistics();
   }
 
   /**
